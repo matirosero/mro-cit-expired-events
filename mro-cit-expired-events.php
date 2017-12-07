@@ -1,21 +1,18 @@
 <?php
 /**
- * Plugin Name: CIT Expored Events
- * Plugin URI: http://tedxpuravida.org
+ * Plugin Name: CIT Expired Events
+ * Plugin URI: https://github.com/matirosero/mro-cit-expired-events
  * Description: Change CPT to past events when an event expires.
  * Author: Matilde Rosero
- * Author URI: http://matilderosero.com
+ * Author URI: https://matilderosero.com
  * Version: 0.1.0
  */
 
 //defined( 'ABSPATH' ) or die( 'No script kiddies please!' );
 
 
-add_action( 'mro_cit_expired_events_cron_hook', 'mro_cit_expired_events_cron_exec' );
-function mro_cit_expired_events_cron_exec(){
-
-
-	$message = 'Hola, estos son los cambios en número de vistas. '."\r\n\r\n";
+add_action( 'mro_cit_expired_events_cron_hook', 'mro_cit_expired_events_cron_exec', 10, 0 );
+function mro_cit_expired_events_cron_exec() {
 
 
  	//Run code.
@@ -26,146 +23,68 @@ function mro_cit_expired_events_cron_exec(){
 
 	$query = new WP_Query(
 		array(
-			'post_type' => 'tedxvideo',
-			'posts_per_page' => $per_page,
-			'tax_query'	=> array(
-				array(
-					'taxonomy'  => 'video-type',
-					'field'     => 'slug',
-					'terms'     => 'patrocinador', // exclude media posts in the news-cat custom taxonomy
-					'operator'  => 'NOT IN'
-				)
-	        )
+			'post_type'   => 'tribe_events',
+			'post_status' => 'publish',
+			'order'       => 'DESC',
+			'orderby'     => 'date',
+			'posts_per_page' => -1,
 
+			'eventDisplay' => 'past',
 		)
 	);
 
+	if( ! $query->have_posts() ) :
+	    return false;
+	else :
+		$message = 'Hola, estos son los eventos que acaban de pasar: '."\r\n\r\n";
 
-	while ($query->have_posts()) : $query->the_post();
+		while ($query->have_posts()) : $query->the_post();
 
-		//get post id
-		$post_id =get_the_ID();
+			//get post id
+			$post_id =get_the_ID();
 
-		//get the title
-		$the_title = get_the_title();
+			//get the title
+			$the_title = get_the_title();
 
-		//Get Youtube video ID
-		//$ytvideo_id = get_post_meta($post_id, '_meta_tedx_ytvideo_id', true);
+			//get the link
+			$link = get_permalink();
 
-        $video = get_field( 'talk_youtube_link' );
+			//get event start date
+			$event_date = tribe_get_start_date( null, false, 'Y-m-d H:i:s' );
 
-        preg_match('/src="(.+?)"/', $video, $matches_url );
-        if ( isset($matches_url[0]) && isset($matches_url[1]) ) :
-            $src = $matches_url[1];  //undefined offset 1
-        else:
-            $src = '';
-        endif;
-
-        preg_match('/embed(.*?)?feature/', $src, $matches_id );
-        if ( isset($matches_id[0]) && isset($matches_id[1]) ) :
-            $youtube_id = $matches_id[1];  //undefined offset 1
-        else:
-            $youtube_id = '';
-        endif;
-        $ytvideo_id = str_replace( str_split( '?/' ), '', $youtube_id );
+			//convert to gmt date
+			$gmt = get_gmt_from_date( $event_date );
 
 
+			$message .= $the_title.' ( '.$link.' ) - '.$event_date."\r\n"; //Works till here!
 
 
+			$convert = array(
+		        'ID'            => $post_id, // ID of the post to update
+		        'post_date'     => $event_date,
+		        'post_date_gmt' => $gmt,
+			);
 
-		$message = $message.$the_title.' ( https://www.youtube.com/watch?v='.$ytvideo_id.' )'."\r\n"; //Works till here!
+			wp_update_post($convert);
 
-		//YT IDs are CURRENTLY 11 characters
-		if ( 11 == strlen( $ytvideo_id )) {
+			set_post_type( $post_id, 'cit_past_event' );
 
-			//$message = $message.' and is less than 11 characters'."\r\n";
+		endwhile;
 
+		date_default_timezone_set('America/Costa_Rica');
+		$date = date('m/d/Y h:i:s a', time());
 
-			$key = 'AIzaSyCxb_HsjaOhx9dLsV9QQYkMaS0MkNVWcvE';
+		$message = $date."\r\n\r\n".$message;
 
-			$jsonURL = file_get_contents("https://www.googleapis.com/youtube/v3/videos?id={$ytvideo_id}&key={$key}&part=statistics");
-			$json = json_decode($jsonURL);
-			$jsonviews = $json->{'items'}[0]->{'statistics'}->{'viewCount'};
+		// components for our email
+		$recepients = 'gekidasa@gmail.com';//roberto@sasso.com
+		$subject = 'Eventos recién pasados CIT';
 
-			$message = $message.'Vistas actuales = '. $jsonviews."\r\n";
+		// let's send it
+		mail($recepients, $subject, $message);
 
-			if (isset($jsonviews)) {
+	endif;
 
-				//$message = $message.'. IS SET'."\r\n";
-
-				if ( get_post_meta($post_id, "_meta_tedx_ytvideo_viewCount", true) ) {
-
-					//$message = $message.'There are views in DB'."\r\n";
-
-					$dbviews = get_post_meta($post_id, "_meta_tedx_ytvideo_viewCount", true);
-
-					$message = $message.'Vistas anteriores = '.$dbviews."\r\n";
-
-
-					if ($jsonviews != $dbviews) {
-
-						$message = $message.'Actualizar base de datos'."\r\n\r\n";
-
-						$jsonviews = intval($jsonviews);
-
-
-						//updates DB with real view count
-						update_post_meta( $post_id, '_meta_tedx_ytvideo_viewCount', $jsonviews );
-
-
-
-					} else {
-
-						$message = $message.'Nada que hacer'."\r\n\r\n";
-
-					}
-
-				} else {
-
-					$message = $message.'No había vistas en la base de datos, actualizar la base con vistas iniciales'."\r\n\r\n";
-
-					$dbviews = 0;
-
-					$jsonviews = intval($jsonviews);
-
-					//updates DB with real view count
-					add_post_meta( $post_id, '_meta_tedx_ytvideo_viewCount', $jsonviews );
-
-				}
-
-				//counter stuff
-				$total_yt_views = $total_yt_views + $jsonviews;
-				$total_db_views = $total_db_views + $dbviews;
-
-
-
-			} else {
-
-				$message = $message.'. IS NOT SET'."\r\n\r\n";
-
-			}
-
-		} else {
-			$message = $message.'YT ID is longer than 11 digits. Bye bye. '."\r\n\r\n";
-		}
-
-
-	endwhile;
-
-	date_default_timezone_set('America/Costa_Rica');
-	$date = date('m/d/Y h:i:s a', time());
-
-	$counter_stuff = 'Total de vistas = '.$total_yt_views."\r\n".'(Anteriores = '.$total_db_views.")\r\n\r\n";
-
-
-	$message = $date."\r\n\r\n".$counter_stuff.$message;
-
-	// components for our email
-	$recepients = 'gekidasa@gmail.com';//roberto@sasso.com
-	$subject = 'Vistas de videos TEDxPuravida';
-
-	// let's send it
-	mail($recepients, $subject, $message);
 
 
 }
